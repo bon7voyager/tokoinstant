@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="800" height="400" font-family="Arial Black, Arial, sans-serif">
+  <rect width="800" height="400" fill="#FF5CA8"/>
+  <rect x="14" y="14" width="772" height="372" fill="none" stroke="#111111" stroke-width="10"/>
+  <!-- dotted texture -->
+  <g fill="#111111" opacity="0.12">
+    <circle cx="60" cy="60" r="6"/><circle cx="140" cy="60" r="6"/><circle cx="220" cy="60" r="6"/>
+    <circle cx="700" cy="330" r="6"/><circle cx="620" cy="350" r="6"/><circle cx="740" cy="290" r="6"/>
+  </g>
+  <!-- tag -->
+  <g transform="rotate(-3 60 70)">
+    <rect x="44" y="48" width="220" height="46" fill="#111111"/>
+    <text x="154" y="80" fill="#FFD23F" font-size="26" font-weight="bold" text-anchor="middle" letter-spacing="2">PROMO SPESIAL</text>
+  </g>
+  <!-- headline -->
+  <text x="56" y="200" fill="#111111" font-size="96" font-weight="bold" letter-spacing="-2">DISKON 20%</text>
+  <text x="60" y="262" fill="#111111" font-size="34" font-weight="bold">Semua produk digital ⚡</text>
+  <!-- highlighted line -->
+  <g transform="rotate(-1.5 60 320)">
+    <rect x="56" y="300" width="430" height="44" fill="#FFD23F" stroke="#111111" stroke-width="5"/>
+    <text x="76" y="332" fill="#111111" font-size="26" font-weight="bold">Netflix · Spotify · YouTube · dll</text>
+  </g>
+  <!-- starburst seal -->
+  <g transform="translate(648 150)">
+    <path d="M0,-95 L22,-40 L80,-58 L48,-8 L98,28 L38,32 L40,95 L0,52 L-40,95 L-38,32 L-98,28 L-48,-8 L-80,-58 L-22,-40 Z" fill="#FFD23F" stroke="#111111" stroke-width="6"/>
+    <text x="0" y="2" fill="#111111" font-size="40" font-weight="bold" text-anchor="middle">HEMAT</text>
+    <text x="0" y="40" fill="#111111" font-size="26" font-weight="bold" text-anchor="middle">SEKARANG</text>
+  </g>
+</svg>

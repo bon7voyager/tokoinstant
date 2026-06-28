@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Theme tokens (RGB triplets). Light by default; .dark flips the neutrals. */
+  :root {
+    --ink: 17 17 17; /* borders, shadows, neutral text */
+    --paper: 255 253 245; /* page background */
+    --surface: 255 255 255; /* cards / inputs */
+  }
+  .dark {
+    --ink: 236 236 230; /* light "ink" so borders/shadows/text show on dark */
+    --paper: 18 19 23; /* near-black page */
+    --surface: 33 36 43; /* elevated dark card */
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-paper text-ink antialiased;
+    background-image:
+      linear-gradient(to right, rgb(var(--ink) / 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(var(--ink) / 0.05) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+  ::selection {
+    @apply bg-main;
+    color: #111;
+  }
+}
+
+@layer components {
+  /* Chunky neobrutalist building blocks reused across the app */
+  .brutal-box {
+    @apply border-3 border-ink bg-surface shadow-brutal;
+  }
+  .brutal-input {
+    @apply w-full border-3 border-ink bg-surface px-4 py-3 text-base font-medium
+           outline-none transition-all placeholder:text-ink/40
+           focus:shadow-brutal focus:-translate-x-0.5 focus:-translate-y-0.5;
+  }
+  .brutal-link {
+    @apply font-bold underline decoration-2 underline-offset-4 hover:bg-main;
+  }
+}
+
+/* ---- Dark-mode semantic overrides ----
+   Components hardcode bg-white (cards), bg-ink (dark accents) and text-paper
+   (light text). Remap them per-theme here so we don't have to touch ~40 files. */
+.dark .bg-white {
+  background-color: rgb(var(--surface));
+}
+.dark .bg-ink {
+  /* keep intentional dark surfaces dark (admin bar, sidebar, ticket, ink buttons) */
+  background-color: #0b0c0f;
+}
+.dark [class*="text-paper"] {
+  /* "light text on dark" must stay light even though --paper goes dark */
+  color: rgb(var(--ink));
+}
+/* Resolve text colour by the NEAREST surface, so a dark card (bg-ink) inside a
+   bright section (bg-bubble) keeps light text, while bright chips keep dark text.
+   Each surface sets its own colour; the "light" rules are last so they win ties. */
+.dark :is(.bg-ink, .bg-white, .bg-surface, .bg-paper, .bg-secondary, .bg-grape) {
+  color: rgb(var(--ink)); /* dark surfaces -> light text */
+}
+.dark :is(.bg-main, .bg-accent, .bg-lime, .bg-bubble) {
+  color: #111; /* bright surfaces -> dark text */
+}
+/* Explicit ink-coloured text (text-ink, text-ink/80, …) on bright accents -> dark. */
+.dark :is(.bg-main, .bg-accent, .bg-lime, .bg-bubble) [class*="text-ink"] {
+  color: #111;
+}
+/* …but if that ink text sits on a DARK sub-surface nested inside a bright accent
+   (e.g. a white/ink button or card inside a bright section), keep it light. */
+.dark :is(.bg-main, .bg-accent, .bg-lime, .bg-bubble) :is(.bg-ink, .bg-white, .bg-surface, .bg-paper) [class*="text-ink"],
+.dark :is(.bg-main, .bg-accent, .bg-lime, .bg-bubble) :is(.bg-ink, .bg-white, .bg-surface, .bg-paper)[class*="text-ink"] {
+  color: rgb(var(--ink));
+}
+
+/* Hide number input spinners */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Marquee */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-\[marquee_24s_linear_infinite\] {
+    animation: none;
+  }
+}

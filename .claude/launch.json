@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "kilat-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "autoPort": true,
+      "port": 3000
+    },
+    {
+      "name": "seventhree-dev",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "cd /d D:\\Seventhree-Motor && npm run dev -- -p 3100"],
+      "autoPort": false,
+      "port": 3100
+    }
+  ]
+}

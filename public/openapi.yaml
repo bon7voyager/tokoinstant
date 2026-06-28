@@ -1,0 +1,201 @@
+openapi: 3.0.3
+info:
+  title: Kilat Shop — Reseller API
+  version: "1.0.0"
+  description: >
+    Host-to-host API for resellers to sell Kilat Shop digital products on their own
+    site. Orders are paid from the reseller's prepaid balance (reseller pricing) or
+    per-order via payment gateway. Access is limited to active reseller members.
+servers:
+  - url: https://your-domain.com/api/reseller
+    description: Replace with your deployment's base URL
+security:
+  - bearerAuth: []
+paths:
+  /products:
+    get:
+      summary: List active products (reseller price + stock)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  products:
+                    type: array
+                    items: { $ref: "#/components/schemas/Product" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /products/{slug}:
+    get:
+      summary: Get one product by slug
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  product: { $ref: "#/components/schemas/Product" }
+        "404": { $ref: "#/components/responses/Error" }
+  /balance:
+    get:
+      summary: Reseller wallet balance
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  balance: { type: integer, example: 150000 }
+  /orders:
+    get:
+      summary: List your orders (newest first, keyset pagination)
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, processing, completed, failed, expired, refunded] }
+        - in: query
+          name: cursor
+          description: last order id from the previous page
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  orders:
+                    type: array
+                    items: { $ref: "#/components/schemas/Order" }
+                  next_cursor: { type: string, nullable: true }
+    post:
+      summary: Create an order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product, ref_id]
+              properties:
+                product: { type: string, description: product slug, example: netflix-premium-1-bulan }
+                ref_id: { type: string, description: your order id (idempotency key), example: ORDER-12345 }
+                pay_method: { type: string, enum: [balance, gateway], default: balance }
+                variant_id: { type: string, nullable: true }
+                quantity: { type: integer, default: 1, minimum: 1, maximum: 10 }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  order: { $ref: "#/components/schemas/Order" }
+        "400": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /orders/{ref}:
+    get:
+      summary: Get order status by your ref_id or our order_number
+      parameters:
+        - in: path
+          name: ref
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  order: { $ref: "#/components/schemas/Order" }
+        "404": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: "API key: Authorization: Bearer <api_key>"
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              ok: { type: boolean, example: false }
+              error:
+                type: object
+                properties:
+                  code: { type: string, example: out_of_stock }
+                  message: { type: string }
+  schemas:
+    Variant:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        price: { type: integer, description: reseller price }
+        list_price: { type: integer }
+        stock: { type: integer, nullable: true }
+    Product:
+      type: object
+      properties:
+        slug: { type: string }
+        name: { type: string }
+        description: { type: string }
+        category: { type: string, nullable: true }
+        fulfillment: { type: string, enum: [AUTO, MANUAL] }
+        price: { type: integer, nullable: true, description: reseller price (null if variant product) }
+        list_price: { type: integer, nullable: true }
+        stock: { type: integer, nullable: true }
+        variants:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/Variant" }
+    Payment:
+      type: object
+      properties:
+        redirect_url: { type: string, nullable: true }
+        qr_string: { type: string, nullable: true }
+        qr_image_url: { type: string, nullable: true }
+        pay_code: { type: string, nullable: true }
+    Order:
+      type: object
+      properties:
+        order_ref: { type: string, nullable: true, description: your ref_id }
+        order_number: { type: string }
+        status: { type: string, enum: [pending, processing, completed, failed, expired, refunded] }
+        pay_method: { type: string, enum: [BALANCE, GATEWAY] }
+        product: { type: string }
+        quantity: { type: integer }
+        total: { type: integer }
+        account: { type: string, nullable: true, description: delivered credentials when completed }
+        created_at: { type: string, format: date-time }
+        payment: { $ref: "#/components/schemas/Payment" }

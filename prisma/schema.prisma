@@ -1,0 +1,485 @@
+// Kilat — database schema
+// Local dev uses SQLite. For production, change provider to "postgresql"
+// and update DATABASE_URL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING // waiting for payment
+  PAID // payment received, delivering
+  COMPLETED // stock delivered to buyer
+  FAILED // payment failed / out of stock
+  EXPIRED // not paid in time
+  REFUNDED // refunded by admin (funds returned as balance/store credit)
+}
+
+enum StockStatus {
+  AVAILABLE
+  SOLD
+}
+
+enum FulfillmentType {
+  AUTO // delivered automatically from the stock pool on payment
+  MANUAL // delivered manually by an admin after payment
+}
+
+enum BalanceTxType {
+  TOPUP // credit from a paid top-up
+  PURCHASE // debit, paying for an order with balance
+  REFUND // credit, order refunded / withdrawal rejected
+  WITHDRAWAL // debit, funds held for a withdrawal request
+  ADJUSTMENT // admin manual credit/debit
+}
+
+enum WithdrawalStatus {
+  PENDING // awaiting admin review (funds already held)
+  APPROVED // admin transferred the funds out
+  REJECTED // declined; held funds returned to balance
+}
+
+enum TopUpStatus {
+  PENDING
+  PAID
+  FAILED
+  EXPIRED
+}
+
+enum MembershipPurchaseStatus {
+  PENDING
+  PAID
+  FAILED
+  EXPIRED
+}
+
+enum MembershipAction {
+  GRANT // admin granted / extended membership manually
+  REVOKE // admin revoked membership manually
+}
+
+enum CouponType {
+  PERCENT
+  FIXED
+}
+
+enum NotificationChannel {
+  EMAIL
+  WHATSAPP
+}
+
+enum NotificationStatus {
+  SENT // provider accepted the dispatch
+  FAILED // provider call attempted but errored / rejected
+  LOGGED // no provider configured -> only recorded (default fallback)
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String? // null for accounts created via Google OAuth
+  role      Role     @default(USER)
+  phone     String? // normalized to 62xxxx for WhatsApp; optional
+  balance   Int      @default(0) // denormalized wallet cache (IDR); ledger is source of truth
+  premiumUntil DateTime? // reseller/premium membership active until this date (null = regular)
+  isGuest   Boolean  @default(false) // account auto-created at checkout (password emailed); not self-registered
+  signupIp  String? // best-effort IP at signup, for referral self-dealing detection (null = unknown)
+  createdAt DateTime @default(now())
+
+  // Reseller API: webhook URL we POST order updates to + secret used to sign them.
+  apiCallbackUrl    String?
+  apiCallbackSecret String?
+
+  orders              Order[]
+  balanceTransactions BalanceTransaction[]
+  topUps              TopUp[]
+  withdrawals         Withdrawal[]
+  notifications       Notification[]
+  membershipPurchases MembershipPurchase[]
+  membershipLogs      MembershipLog[]
+  ratings             Rating[]
+  apiKeys             ApiKey[]
+  apiCallbackLogs     ApiCallbackLog[]
+
+  referralCode     String?    @unique // this user's own share code
+  referralsGiven   Referral[] @relation("ReferralReferrer")
+  referralReceived Referral?  @relation("ReferralReferred")
+}
+
+// One referral link: a referrer invited a referred user. Both get a balance bonus
+// when the referred user completes their FIRST order (anti-abuse).
+model Referral {
+  id            String    @id @default(cuid())
+  status        String    @default("PENDING") // PENDING | REWARDED
+  createdAt     DateTime  @default(now())
+  rewardedAt    DateTime?
+  rewardOrderId String? // the order whose completion triggered the reward (for refund reversal)
+
+  referrerId String
+  referrer   User   @relation("ReferralReferrer", fields: [referrerId], references: [id], onDelete: Cascade)
+
+  referredId String @unique // a user can be referred at most once
+  referred   User   @relation("ReferralReferred", fields: [referredId], references: [id], onDelete: Cascade)
+
+  @@index([referrerId])
+  @@index([rewardOrderId])
+}
+
+// Reseller API credential. The full key is shown once at creation; we store only
+// its SHA-256 hash + a short prefix for display. Auth = `Authorization: Bearer <key>`.
+model ApiKey {
+  id         String    @id @default(cuid())
+  label      String // human label set by the reseller
+  prefix     String // first chars of the key, for display ("rsk_ab12…")
+  keyHash    String    @unique // sha256(fullKey)
+  lastUsedAt DateTime?
+  revokedAt  DateTime? // null = active
+  createdAt  DateTime  @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// Delivery log for reseller webhook callbacks — so resellers can see whether their
+// endpoint received each order update (and the response code).
+model ApiCallbackLog {
+  id          String   @id @default(cuid())
+  orderNumber String
+  event       String // "order.update"
+  status      String // "SENT" | "FAILED"
+  httpStatus  Int? // response status code when reached
+  attempts    Int      @default(1)
+  error       String? // reason on failure
+  createdAt   DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+/// Pending email-verified registration. Holds the would-be account data + a
+/// hashed OTP until the user enters the code; on success the real User is created
+/// and this row is deleted. One pending row per email (upserted on resend/retry).
+model EmailVerification {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  kind         String   @default("register") // "register" | "guest" — which flow created it
+  name         String
+  passwordHash String? // bcrypt of the chosen password (register only; guest generates at verify)
+  phone        String?
+  codeHash     String // bcrypt of the 6-digit OTP
+  attempts     Int      @default(0) // wrong-code attempts; locked after a cap
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+}
+
+model Category {
+  id       String    @id @default(cuid())
+  name     String    @unique
+  slug     String    @unique
+  emoji    String    @default("📦")
+  products Product[]
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String
+  price       Int // price in IDR (rupiah), no decimals
+  imageUrl    String?
+  badge       String? // e.g. "TERLARIS", "BARU"
+  warranty    String? // warranty label/duration shown as a highlight, e.g. "Garansi 30 Hari"
+  instant     Boolean  @default(true) // show the "⚡ Instan" highlight badge
+  isOfficial  Boolean  @default(true) // show the "✅ Resmi" highlight badge
+  isActive    Boolean  @default(true)
+  views       Int      @default(0) // detail-page view count (buyer-facing popularity signal)
+  resellerPercent Int? // per-product reseller discount % (0-90); null = use the global default
+  fulfillment FulfillmentType @default(AUTO) // AUTO from stock, or MANUAL by admin
+  createdAt   DateTime @default(now())
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  stocks   Stock[]
+  orders   Order[]
+  variants ProductVariant[]
+  ratings  Rating[]
+  flashSaleItems FlashSaleItem[]
+}
+
+// A scheduled flash sale: a time window during which selected products get a
+// percent discount. Buyer pays the lowest of (flash price) vs (reseller price).
+model FlashSale {
+  id        String   @id @default(cuid())
+  name      String
+  startsAt  DateTime
+  endsAt    DateTime
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  items FlashSaleItem[]
+
+  @@index([isActive, startsAt, endsAt])
+}
+
+model FlashSaleItem {
+  id      String @id @default(cuid())
+  percent Int // discount % off list price (1-90)
+
+  flashSaleId String
+  flashSale   FlashSale @relation(fields: [flashSaleId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([flashSaleId, productId])
+  @@index([productId])
+}
+
+// Optional per-product variant (e.g. "1 Bulan" / "Sharing") with its own price & stock.
+// A product with zero variants behaves exactly like before (single price + stock pool).
+model ProductVariant {
+  id        String   @id @default(cuid())
+  name      String // e.g. "1 Bulan", "Sharing"
+  price     Int // IDR
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  stocks Stock[]
+  orders Order[]
+
+  @@index([productId])
+}
+
+// A single deliverable unit of stock (one account / voucher / code).
+model Stock {
+  id         String      @id @default(cuid())
+  secret     String // the credential delivered to the buyer (email:pass, code, etc.)
+  note       String? // internal note, e.g. duration / profile
+  status     StockStatus @default(AVAILABLE)
+  replacedAt DateTime? // set when this delivered unit is superseded by a warranty replacement
+  createdAt  DateTime    @default(now())
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  orderId String?
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([productId, variantId, status])
+}
+
+model Order {
+  id          String      @id @default(cuid())
+  orderNumber String      @unique
+  quantity        Int         @default(1)
+  subtotal        Int         @default(0) // list price * qty BEFORE any discount
+  resellerDiscount Int        @default(0) // reseller/premium price cut (>= 0)
+  flashDiscount   Int         @default(0) // flash-sale price cut (>= 0)
+  discount        Int         @default(0) // coupon discount (>= 0)
+  total           Int // FINAL payable total (after all discounts), IDR
+  payMethod   String      @default("GATEWAY") // "GATEWAY" | "BALANCE"
+  source      String      @default("WEB") // "WEB" | "API" — how the order was placed
+  externalRef String? // reseller's own order id (API), for idempotency & lookup
+  status      OrderStatus @default(PENDING)
+  paymentRef  String? // reference id from payment gateway
+  createdAt   DateTime    @default(now())
+  expiresAt   DateTime? // payment deadline for PENDING orders; past this -> auto EXPIRED
+  paidAt      DateTime?
+  completedAt DateTime? // when status became COMPLETED (delivery/receipt) — drives the rating window
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  variantId   String?
+  variant     ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  variantName String? // snapshot of the variant name at purchase time
+
+  couponId String?
+  coupon   Coupon? @relation(fields: [couponId], references: [id], onDelete: SetNull)
+
+  // stock items delivered for this order
+  deliveredStocks Stock[]
+  notifications   Notification[]
+  rating          Rating?
+
+  @@unique([userId, externalRef]) // idempotency for API orders (multiple NULLs allowed)
+  @@index([status, completedAt])
+}
+
+// One product rating per order. Buyer rates after the order is received; if they
+// don't within the window, an auto 5★ rating is created (see lib/ratings.ts).
+model Rating {
+  id        String   @id @default(cuid())
+  stars     Int // 1-5
+  comment   String?
+  isAuto    Boolean  @default(false) // auto-filled 5★ (buyer didn't rate in time)
+  createdAt DateTime @default(now())
+
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+// Append-only wallet ledger. Source of truth for balance; User.balance is a cache.
+model BalanceTransaction {
+  id           String        @id @default(cuid())
+  type         BalanceTxType
+  amount       Int // SIGNED: +credit / -debit (IDR)
+  balanceAfter Int // user.balance immediately after this tx
+  note         String?
+  ref          String? // e.g. orderNumber, topUp id, "ADMIN:<adminId>"
+  createdAt    DateTime      @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model TopUp {
+  id         String      @id @default(cuid())
+  amount     Int // IDR, > 0
+  status     TopUpStatus @default(PENDING)
+  paymentRef String?
+  createdAt  DateTime    @default(now())
+  paidAt     DateTime?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// An upfront purchase of premium/reseller membership (2-step: PENDING -> PAID).
+model MembershipPurchase {
+  id         String                   @id @default(cuid())
+  amount     Int // upfront fee in IDR
+  days       Int // membership duration granted on settlement
+  status     MembershipPurchaseStatus @default(PENDING)
+  payMethod  String                   @default("GATEWAY") // "GATEWAY" | "BALANCE"
+  paymentRef String?
+  createdAt  DateTime                 @default(now())
+  paidAt     DateTime?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// Audit log of manual membership changes made by an admin (grant/extend/revoke).
+// User-initiated purchases are recorded in MembershipPurchase instead.
+model MembershipLog {
+  id        String           @id @default(cuid())
+  action    MembershipAction
+  days      Int? // duration granted/extended in days (null for revoke)
+  note      String?
+  adminId   String? // admin who performed the action
+  createdAt DateTime         @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model Withdrawal {
+  id            String           @id @default(cuid())
+  amount        Int // IDR, > 0 — held (debited) at request time
+  status        WithdrawalStatus @default(PENDING)
+  method        String // "BANK" | "EWALLET"
+  accountName   String // account holder name
+  accountNumber String // bank account / e-wallet number
+  note          String? // optional note from the user
+  adminNote     String? // note from admin when processed
+  createdAt     DateTime         @default(now())
+  processedAt   DateTime?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+model Coupon {
+  id          String     @id @default(cuid())
+  code        String     @unique // always stored UPPERCASE
+  type        CouponType
+  value       Int // PERCENT: 1..100 ; FIXED: IDR amount
+  minSpend    Int        @default(0) // min order subtotal to qualify
+  maxDiscount Int? // cap for PERCENT (IDR); ignored for FIXED
+  quota       Int? // null = unlimited
+  usedCount   Int        @default(0)
+  isActive    Boolean    @default(true)
+  expiresAt   DateTime?
+  createdAt   DateTime   @default(now())
+
+  orders Order[]
+}
+
+// Admin-editable key/value settings (payment keys, membership/wallet config, …).
+// Resolved at runtime with precedence: this table > environment variable > default.
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model Notification {
+  id          String              @id @default(cuid())
+  channel     NotificationChannel
+  status      NotificationStatus  @default(LOGGED)
+  template    String // template key, e.g. "order_completed" | "topup_success"
+  to          String // destination: email address or 62xxxx phone
+  subject     String? // email subject (null for WA)
+  body        String // rendered message body (may contain credentials; can be redacted)
+  payload     String? // JSON string of render data (redacted of secrets)
+  provider    String? // "resend" | "smtp" | "fonnte" | null when LOGGED
+  providerRef String? // provider message id when available
+  error       String? // error message when FAILED
+  createdAt   DateTime            @default(now())
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  orderId String?
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([channel])
+  @@index([status])
+}
