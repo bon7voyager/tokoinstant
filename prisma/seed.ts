@@ -3,39 +3,38 @@ import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
+// Demo data (test user, sample products with FAKE stock, demo coupons) is for
+// local development ONLY. Production must NOT ship fake account secrets or a
+// publicly-known test login. Enable demo data explicitly:
+//   SEED_DEMO=1 npm run db:seed
+const SEED_DEMO =
+  process.env.SEED_DEMO === "1" || process.env.SEED_DEMO === "true";
+
 async function main() {
-  console.log("🌱 Seeding database...");
+  console.log(`🌱 Seeding database... (demo data: ${SEED_DEMO ? "ON" : "OFF"})`);
 
-  // ---- Users ----
-  const adminPassword = await bcrypt.hash("admin123", 10);
-  const userPassword = await bcrypt.hash("user123", 10);
+  // ---- Admin (always) ----
+  // Credentials are configurable so production can seed a strong password.
+  const adminEmail = process.env.ADMIN_EMAIL ?? "admin@kilat.shop";
+  const adminPlain = process.env.ADMIN_PASSWORD ?? "admin123";
+  const adminPassword = await bcrypt.hash(adminPlain, 10);
 
-  const admin = await prisma.user.upsert({
-    where: { email: "admin@kilat.shop" },
+  await prisma.user.upsert({
+    where: { email: adminEmail },
     update: {},
     create: {
-      email: "admin@kilat.shop",
+      email: adminEmail,
       name: "Admin Kilat",
       password: adminPassword,
       role: "ADMIN",
     },
   });
+  console.log(`✅ Admin: ${adminEmail} / ${adminPlain}`);
+  if (!process.env.ADMIN_PASSWORD) {
+    console.log("   ⚠️  Default password — ganti setelah login pertama!");
+  }
 
-  await prisma.user.upsert({
-    where: { email: "user@kilat.shop" },
-    update: {},
-    create: {
-      email: "user@kilat.shop",
-      name: "Budi Pelanggan",
-      password: userPassword,
-      role: "USER",
-    },
-  });
-
-  console.log(`✅ Admin: admin@kilat.shop / admin123`);
-  console.log(`✅ User : user@kilat.shop / user123`);
-
-  // ---- Categories ----
+  // ---- Categories (always) ----
   const categoryData = [
     { name: "Streaming Film", slug: "streaming-film", emoji: "🎬" },
     { name: "Musik", slug: "musik", emoji: "🎵" },
@@ -53,6 +52,30 @@ async function main() {
     });
     categories[c.slug] = cat.id;
   }
+  console.log(`✅ ${categoryData.length} categories ready`);
+
+  if (!SEED_DEMO) {
+    console.log("🌱 Done! (production-clean: admin + categories only)");
+    return;
+  }
+
+  // ============================================================
+  //  DEMO DATA — development only (SEED_DEMO=1)
+  // ============================================================
+
+  // ---- Demo user ----
+  const userPassword = await bcrypt.hash("user123", 10);
+  await prisma.user.upsert({
+    where: { email: "user@kilat.shop" },
+    update: {},
+    create: {
+      email: "user@kilat.shop",
+      name: "Budi Pelanggan",
+      password: userPassword,
+      role: "USER",
+    },
+  });
+  console.log(`✅ Demo user: user@kilat.shop / user123`);
 
   // ---- Products ----
   const productData = [
@@ -269,7 +292,7 @@ async function main() {
     }
   }
 
-  console.log(`✅ ${productData.length} products + stock created`);
+  console.log(`✅ ${productData.length} demo products + stock created`);
 
   // ---- Coupons (demo) ----
   const couponData = [
@@ -286,7 +309,7 @@ async function main() {
   }
   console.log(`✅ ${couponData.length} demo coupons created (HEMAT10, POTONG5K, NEWUSER)`);
 
-  console.log("🌱 Done!");
+  console.log("🌱 Done! (demo data seeded)");
 }
 
 main()

@@ -63,9 +63,17 @@ Isi minimal yang WAJIB:
 ## 3. Siapkan database (SQLite)
 ```bash
 npx prisma db push          # buat tabel di prod.db
-npm run db:seed             # isi admin, produk contoh, kupon demo
+npm run db:seed             # isi admin + 5 kategori (PRODUKSI-AMAN, tanpa data demo)
 ```
-Seed membuat admin **admin@kilat.shop / admin123**.
+Seed default membuat admin **admin@kilat.shop / admin123** + 5 kategori kosong
+(tanpa produk/kupon/user demo — production mulai bersih, tinggal tambah produk asli
+via `/admin`).
+
+Opsi:
+- Set password admin kuat saat seed: `ADMIN_EMAIL=... ADMIN_PASSWORD=... npm run db:seed`
+- Isi data contoh untuk testing: `SEED_DEMO=1 npm run db:seed` (16 produk demo +
+  stok PALSU + kupon — **jangan dipakai di production**).
+
 **Wajib ganti password admin** setelah login pertama (atau ganti email/akun via /admin/users).
 
 ---
